@@ -1,8 +1,10 @@
 #include "BreakFrame.h"
-#include "resource1.h"
-#include <wx/msw/private.h>
 
-BreakFrame::BreakFrame(const wxString& title, int seconds)
+BreakFrame::BreakFrame(const wxString& title,
+    const wxString& message,
+    const wxString& footer,
+    int seconds,
+    std::function<void()> onClosed)
     : wxFrame(
         nullptr,
         wxID_ANY,
@@ -12,8 +14,12 @@ BreakFrame::BreakFrame(const wxString& title, int seconds)
         wxSTAY_ON_TOP | wxBORDER_NONE
     ),
     m_timer(this),
-    m_timeLeft(seconds)
+    m_timeLeft(seconds),
+    m_showMinutes(seconds >= 60),
+    m_onClosed(std::move(onClosed))
 {
+    SetIcon(wxIcon("app_icon", wxBITMAP_TYPE_ICO_RESOURCE));
+
     wxSize frameSize(360, 560);
 
     SetClientSize(frameSize);
@@ -38,47 +44,27 @@ BreakFrame::BreakFrame(const wxString& title, int seconds)
     rootPanel->SetSizer(rootSizer);
 
     wxBoxSizer* cardSizer = new wxBoxSizer(wxVERTICAL);
+    cardSizer->AddSpacer(38);
 
-    //// Top image-style placeholder
-    //wxPanel* imagePanel = new wxPanel(
-    //    cardPanel,
-    //    wxID_ANY,
-    //    wxDefaultPosition,
-    //    wxSize(270, 120)
-    //);
+    // Top image, embedded in the exe (see app.rc) so it loads no matter
+    // which folder the app is started from.
+    wxBitmap breakBitmap = wxBITMAP_PNG(eye_break);
 
-    //imagePanel->SetBackgroundColour(wxColour(218, 238, 230));
-
-    // Top image
-    wxImage::AddHandler(new wxPNGHandler());
-
-    wxImage breakImage("eye-break.png", wxBITMAP_TYPE_PNG);
-
-    if (!breakImage.IsOk())
+    if (breakBitmap.IsOk())
     {
-        wxMessageBox("Could not load break.png", "Image Error");
-    }
-    else
-    {
-        breakImage = breakImage.Scale(270, 120, wxIMAGE_QUALITY_HIGH);
-    }
+        wxImage breakImage = breakBitmap.ConvertToImage().Scale(270, 120, wxIMAGE_QUALITY_HIGH);
 
-    wxBitmap breakBitmap(breakImage);
+        wxStaticBitmap* imageBitmap = new wxStaticBitmap(
+            cardPanel,
+            wxID_ANY,
+            wxBitmap(breakImage)
+        );
 
-    wxStaticBitmap* imageBitmap = new wxStaticBitmap(
-        cardPanel,
-        wxID_ANY,
-        breakBitmap,
-        wxDefaultPosition,
-        wxSize(270, 120)
-    );
+        cardSizer->Add(imageBitmap, 0, wxALIGN_CENTER | wxBOTTOM, 25);
+    }
 
     // Title
-    wxStaticText* titleLabel = new wxStaticText(
-        cardPanel,
-        wxID_ANY,
-        "Time for a Screen Break"
-    );
+    wxStaticText* titleLabel = new wxStaticText(cardPanel, wxID_ANY, title);
 
     wxFont titleFont = titleLabel->GetFont();
     titleFont.SetPointSize(17);
@@ -90,7 +76,7 @@ BreakFrame::BreakFrame(const wxString& title, int seconds)
     wxStaticText* subtitleLabel = new wxStaticText(
         cardPanel,
         wxID_ANY,
-        "Stand up, stretch, and drink some water.\nGive your eyes and body a reset.",
+        message,
         wxDefaultPosition,
         wxDefaultSize,
         wxALIGN_CENTER
@@ -113,14 +99,7 @@ BreakFrame::BreakFrame(const wxString& title, int seconds)
 
     wxBoxSizer* countdownSizer = new wxBoxSizer(wxVERTICAL);
 
-    int minutes = m_timeLeft / 60;
-    int remainingSeconds = m_timeLeft % 60;
-
-    m_countdownLabel = new wxStaticText(
-        countdownPanel,
-        wxID_ANY,
-        wxString::Format("%d:%02d", minutes, remainingSeconds)
-    );
+    m_countdownLabel = new wxStaticText(countdownPanel, wxID_ANY, FormatTimeLeft());
 
     wxFont countdownFont = m_countdownLabel->GetFont();
     countdownFont.SetPointSize(22);
@@ -128,21 +107,21 @@ BreakFrame::BreakFrame(const wxString& title, int seconds)
     m_countdownLabel->SetFont(countdownFont);
     m_countdownLabel->SetForegroundColour(wxColour(20, 45, 70));
 
-    wxStaticText* minutesLabel = new wxStaticText(
+    wxStaticText* unitLabel = new wxStaticText(
         countdownPanel,
         wxID_ANY,
-        "MINUTES"
+        m_showMinutes ? "MINUTES" : "SECONDS"
     );
 
-    wxFont minutesFont = minutesLabel->GetFont();
-    minutesFont.SetPointSize(7);
-    minutesFont.SetWeight(wxFONTWEIGHT_BOLD);
-    minutesLabel->SetFont(minutesFont);
-    minutesLabel->SetForegroundColour(wxColour(90, 100, 115));
+    wxFont unitFont = unitLabel->GetFont();
+    unitFont.SetPointSize(7);
+    unitFont.SetWeight(wxFONTWEIGHT_BOLD);
+    unitLabel->SetFont(unitFont);
+    unitLabel->SetForegroundColour(wxColour(90, 100, 115));
 
     countdownSizer->AddStretchSpacer(1);
     countdownSizer->Add(m_countdownLabel, 0, wxALIGN_CENTER);
-    countdownSizer->Add(minutesLabel, 0, wxALIGN_CENTER);
+    countdownSizer->Add(unitLabel, 0, wxALIGN_CENTER);
     countdownSizer->AddStretchSpacer(1);
 
     countdownPanel->SetSizer(countdownSizer);
@@ -164,11 +143,7 @@ BreakFrame::BreakFrame(const wxString& title, int seconds)
         });
 
     // Footer
-    wxStaticText* footerLabel = new wxStaticText(
-        cardPanel,
-        wxID_ANY,
-        "Small breaks help reduce fatigue"
-    );
+    wxStaticText* footerLabel = new wxStaticText(cardPanel, wxID_ANY, footer);
 
     wxFont footerFont = footerLabel->GetFont();
     footerFont.SetPointSize(8);
@@ -176,8 +151,6 @@ BreakFrame::BreakFrame(const wxString& title, int seconds)
     footerLabel->SetForegroundColour(wxColour(80, 90, 105));
 
     // Layout
-    cardSizer->AddSpacer(38);
-    cardSizer->Add(imageBitmap, 0, wxALIGN_CENTER | wxBOTTOM, 25);
     cardSizer->Add(titleLabel, 0, wxALIGN_CENTER | wxBOTTOM, 8);
     cardSizer->Add(subtitleLabel, 0, wxALIGN_CENTER | wxBOTTOM, 35);
     cardSizer->Add(countdownPanel, 0, wxALIGN_CENTER | wxBOTTOM, 38);
@@ -187,26 +160,50 @@ BreakFrame::BreakFrame(const wxString& title, int seconds)
     cardPanel->SetSizer(cardSizer);
 
     Layout();
-    Refresh();
 
     Bind(wxEVT_TIMER, &BreakFrame::OnTimer, this);
+    Bind(wxEVT_CLOSE_WINDOW, &BreakFrame::OnClose, this);
     m_timer.Start(1000);
 }
 
-void BreakFrame::OnTimer(wxTimerEvent& event)
+wxString BreakFrame::FormatTimeLeft() const
+{
+    if (m_showMinutes)
+    {
+        return wxString::Format("%d:%02d", m_timeLeft / 60, m_timeLeft % 60);
+    }
+
+    return wxString::Format("%02d", m_timeLeft);
+}
+
+void BreakFrame::OnTimer(wxTimerEvent&)
 {
     m_timeLeft--;
 
-    int seconds = m_timeLeft % 60;
-    int minutes = m_timeLeft / 60;
-
-    m_countdownLabel->SetLabel(
-        wxString::Format("%d:%02d", minutes, seconds)
-    );
+    m_countdownLabel->SetLabel(FormatTimeLeft());
 
     if (m_timeLeft <= 0)
     {
-        m_timer.Stop();
         Close();
     }
+}
+
+// Runs when the user clicks Close or the countdown finishes. Not called when
+// MainFrame destroys the window directly (e.g. going to sleep), which is what
+// we want: that case shouldn't restart the work timer.
+void BreakFrame::OnClose(wxCloseEvent& event)
+{
+    m_timer.Stop();
+
+    // Clear it first so a second Close() can't run it twice.
+    std::function<void()> onClosed = std::move(m_onClosed);
+    m_onClosed = nullptr;
+
+    if (onClosed)
+    {
+        onClosed();
+    }
+
+    // Let the default handler destroy the window.
+    event.Skip();
 }

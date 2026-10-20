@@ -2,37 +2,73 @@
 
 #include <wx/wx.h>
 #include <wx/timer.h>
+#include <wx/power.h>
+#include <wx/weakref.h>
+#include "BreakSettings.h"
 
-class EyeTimerFrame;
 class BreakFrame;
+class InfoFrame;
+class wxTaskBarIcon;
 
+// Hidden window that runs the break schedule in the background.
 class MainFrame : public wxFrame
 {
 public:
-    MainFrame(const wxString& title);
+    explicit MainFrame(const BreakSettings& settings);
+
+    // Opens the info window, or brings it to the front if already open.
+    void ShowInfo(bool askAboutStartup = false);
+
+    void Quit();
+
+    // Pausing stops all reminders until Resume() starts a fresh cycle.
+    void Pause();
+    void Resume();
+    bool IsPaused() const { return m_paused; }
+
+    // Changes the long break length and saves it. Takes effect from the
+    // next long break.
+    void SetLongBreakSeconds(int seconds);
+
+    // Message a second copy of the app sends to ask this one to ShowInfo().
+    static unsigned int ShowInfoMessageId();
+
+protected:
+    WXLRESULT MSWWindowProc(WXUINT message, WXWPARAM wParam, WXLPARAM lParam) override;
 
 private:
-    enum class State
-    {
-        WAIT_20_MIN,
-        EYE_BREAK,
-        LONG_BREAK
-    };
-
     void OnTimer(wxTimerEvent& event);
 
+#ifdef wxHAS_POWER_EVENTS
+    void OnSuspended(wxPowerEvent& event);
+    void OnResume(wxPowerEvent& event);
+#endif
+
+    void StartWorkPeriod();
+    void ScheduleNextCheck();
+    void ShowBreak();
+    void CloseBreakWindow();
+    void RestartCycle();
+
 private:
+    BreakSettings m_settings;
+
+    // One-shot timer. It wakes up at most every 30 seconds (or exactly when
+    // the next break is due), so the app uses almost no CPU while waiting.
     wxTimer m_timer;
 
-    State m_state = State::WAIT_20_MIN;
+    // Wall-clock times in milliseconds (wxGetUTCTimeMillis).
+    wxLongLong m_breakDueAt;
+    wxLongLong m_expectedCheckAt;
 
-    int m_20min = 20 * 60;       // testing
-    // int m_20min = 20 * 60; // real app
+    int m_breakCount = 0;
 
-    int m_20sec = 20;
-    int m_5min = 5 * 60;
-    int m_cycles = 0;
+    bool m_paused = false;
 
-    EyeTimerFrame* eyeWindow = nullptr;
-    BreakFrame* breakWindow = nullptr;
+    BreakFrame* m_breakWindow = nullptr;
+
+    // Becomes null by itself when the user closes the info window.
+    wxWeakRef<InfoFrame> m_infoWindow;
+
+    wxTaskBarIcon* m_trayIcon = nullptr;
 };
